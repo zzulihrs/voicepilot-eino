@@ -24,6 +24,8 @@ class VoicePilotClient {
         const recordBtn = document.getElementById('recordBtn');
         const uploadBtn = document.getElementById('uploadBtn');
         const fileInput = document.getElementById('fileInput');
+        const sendTextBtn = document.getElementById('sendTextBtn');
+        const textInput = document.getElementById('textInput');
 
         // Recording button - press and hold
         recordBtn.addEventListener('mousedown', () => this.startRecording());
@@ -40,6 +42,14 @@ class VoicePilotClient {
         // Upload button
         uploadBtn.addEventListener('click', () => fileInput.click());
         fileInput.addEventListener('change', (e) => this.handleFileUpload(e));
+
+        // Text input
+        sendTextBtn.addEventListener('click', () => this.sendTextMessage());
+        textInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                this.sendTextMessage();
+            }
+        });
     }
 
     async checkServerStatus() {
@@ -197,6 +207,51 @@ class VoicePilotClient {
         } finally {
             this.hideLoading();
             event.target.value = ''; // Reset file input
+        }
+    }
+
+    async sendTextMessage() {
+        const textInput = document.getElementById('textInput');
+        const text = textInput.value.trim();
+
+        if (!text) {
+            alert('请输入文字内容');
+            return;
+        }
+
+        this.showLoading('正在处理...');
+
+        // Add user message to conversation
+        this.addConversationItem('user', text);
+
+        // Clear input
+        textInput.value = '';
+
+        try {
+            const response = await fetch(`${this.baseURL}/api/text`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    text: text,
+                    session_id: this.sessionId
+                })
+            });
+
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+
+            const data = await response.json();
+            this.handleVoiceResponse(data);
+
+        } catch (error) {
+            console.error('Text request failed:', error);
+            this.updateStatus('error', '请求失败');
+            this.addConversationItem('system', '处理失败: ' + error.message);
+        } finally {
+            this.hideLoading();
         }
     }
 

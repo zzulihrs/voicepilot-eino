@@ -201,6 +201,47 @@ main {
     font-size: 1.5rem;
 }
 
+/* Text Input Panel */
+.text-input-panel {
+    background: var(--surface-color);
+    border-radius: 12px;
+    padding: 25px;
+    margin-bottom: 20px;
+    box-shadow: var(--shadow);
+}
+
+.text-input-panel h2 {
+    font-size: 1.3rem;
+    margin-bottom: 15px;
+    color: var(--text-primary);
+}
+
+.text-input-group {
+    display: flex;
+    gap: 12px;
+    align-items: stretch;
+}
+
+.text-input {
+    flex: 1;
+    padding: 14px 18px;
+    font-size: 1rem;
+    border: 2px solid var(--border-color);
+    border-radius: 8px;
+    outline: none;
+    transition: all 0.3s ease;
+    font-family: inherit;
+}
+
+.text-input:focus {
+    border-color: var(--primary-color);
+    box-shadow: 0 0 0 3px rgba(74, 144, 226, 0.1);
+}
+
+.text-input::placeholder {
+    color: var(--text-secondary);
+}
+
 /* Conversation Panel */
 .conversation-panel {
     background: var(--surface-color);

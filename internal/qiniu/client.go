@@ -10,6 +10,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"time"
 
@@ -34,6 +35,60 @@ func NewClient() *Client {
 	}
 }
 
+// detectAudioFormat detects audio format from file header
+func detectAudioFormat(data []byte) string {
+	if len(data) < 12 {
+		return "wav" // default fallback
+	}
+
+	// WebM/Matroska: starts with 0x1A 0x45 0xDF 0xA3
+	if data[0] == 0x1A && data[1] == 0x45 && data[2] == 0xDF && data[3] == 0xA3 {
+		return "webm"
+	}
+
+	// WAV: starts with "RIFF" at offset 0 and "WAVE" at offset 8
+	if len(data) >= 12 && string(data[0:4]) == "RIFF" && string(data[8:12]) == "WAVE" {
+		return "wav"
+	}
+
+	// MP3: starts with "ID3" or 0xFF 0xFB
+	if len(data) >= 3 {
+		if string(data[0:3]) == "ID3" {
+			return "mp3"
+		}
+		if data[0] == 0xFF && (data[1]&0xE0) == 0xE0 {
+			return "mp3"
+		}
+	}
+
+	// Opus/Ogg: starts with "OggS"
+	if len(data) >= 4 && string(data[0:4]) == "OggS" {
+		return "opus"
+	}
+
+	return "wav" // default fallback
+}
+
+// convertToWav converts any audio format to WAV using ffmpeg or afconvert
+func convertToWav(inputPath string) (string, error) {
+	outputPath := inputPath + ".converted.wav"
+
+	// Try ffmpeg first (more common across platforms)
+	cmd := exec.Command("ffmpeg", "-i", inputPath, "-ar", "16000", "-ac", "1", "-y", outputPath)
+	if err := cmd.Run(); err != nil {
+		log.Printf("ffmpeg conversion failed, trying afconvert: %v", err)
+
+		// Fallback to afconvert (macOS)
+		cmd = exec.Command("afconvert", "-f", "WAVE", "-d", "LEI16@16000", inputPath, outputPath)
+		if err := cmd.Run(); err != nil {
+			return "", fmt.Errorf("audio conversion failed (tried ffmpeg and afconvert): %w", err)
+		}
+	}
+
+	log.Printf("Successfully converted audio to WAV: %s", outputPath)
+	return outputPath, nil
+}
+
 // ASR performs speech-to-text conversion
 func (c *Client) ASR(ctx context.Context, audioPath string) (string, error) {
 	log.Printf("Starting ASR for audio file: %s", audioPath)
@@ -45,13 +100,35 @@ func (c *Client) ASR(ctx context.Context, audioPath string) (string, error) {
 		return "", fmt.Errorf("failed to read audio file: %w", err)
 	}
 
+	// Detect audio format from file header
+	audioFormat := detectAudioFormat(audioData)
+	log.Printf("Detected audio format: %s", audioFormat)
+
+	// Convert to WAV if not already WAV format
+	finalAudioPath := audioPath
+	if audioFormat != "wav" {
+		log.Printf("Converting %s to WAV format...", audioFormat)
+		convertedPath, err := convertToWav(audioPath)
+		if err != nil {
+			return "", fmt.Errorf("failed to convert audio to WAV: %w", err)
+		}
+		defer os.Remove(convertedPath) // Clean up converted file after use
+		finalAudioPath = convertedPath
+
+		// Re-read the converted WAV file
+		audioData, err = os.ReadFile(finalAudioPath)
+		if err != nil {
+			return "", fmt.Errorf("failed to read converted audio file: %w", err)
+		}
+	}
+
 	// Encode to base64
 	audioBase64 := base64.StdEncoding.EncodeToString(audioData)
 
-	// Construct data URL (format exactly as in ai-role project)
+	// Always use WAV format for ASR API
 	dataURL := "data:audio/wav;base64," + audioBase64
 
-	// Build request (using same structure as ai-role)
+	// Build request with WAV format
 	reqBody := map[string]interface{}{
 		"model": "asr",
 		"audio": map[string]interface{}{
