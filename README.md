@@ -13,6 +13,8 @@ VoicePilot-Eino 是一个智能语音控制系统，支持通过语音交互控�
 - 任务执行：根据意图执行相应的系统操作
 - 语音反馈：将执行结果转换为语音输出
 - 安全控制：白名单机制防止危险操作
+- Web 界面：浏览器端语音交互界面
+- 单元测试：完整的测试覆盖
 
 ### 支持的操作
 
@@ -67,6 +69,11 @@ VoicePilot-Eino 是一个智能语音控制系统，支持通过语音交互控�
 ├── pkg/
 │   ├── types/           # 公共类型定义
 │   └── utils/           # 工具函数
+├── web/                 # Web前端
+│   ├── index.html       # 主页面
+│   └── static/
+│       ├── css/         # 样式文件
+│       └── js/          # JavaScript
 ├── static/
 │   └── audio/           # 音频文件存储
 ├── temp/                # 临时文件
@@ -83,7 +90,9 @@ VoicePilot-Eino 是一个智能语音控制系统，支持通过语音交互控�
 
 ### 前置要求
 
-- Go 1.21 或更高版本
+- **Go 1.21 或更高版本**（必需）
+  - macOS: `brew install go@1.21` 或从 https://go.dev/dl/ 下载
+  - 验证版本: `go version`
 - 七牛云账号和 API Key
 
 ### 安装步骤
@@ -126,6 +135,10 @@ make run
 ```
 
 服务将在 `http://localhost:8080` 启动。
+
+6. 访问 Web 界面
+
+打开浏览器访问 `http://localhost:8080` 即可使用 Web 界面进行语音交互。
 
 ### 构建可执行文件
 
@@ -250,6 +263,28 @@ make fmt
 make test
 ```
 
+### 测试覆盖
+
+项目包含以下模块的单元测试：
+
+- `internal/config`: 配置管理测试
+- `internal/security`: 安全验证测试
+- `internal/executor`: 任务执行测试
+
+运行测试：
+```bash
+# 运行所有测试
+go test ./...
+
+# 运行特定模块测试
+go test ./internal/config
+go test ./internal/security
+go test ./internal/executor
+
+# 查看测试覆盖率
+go test -cover ./...
+```
+
 ### 添加新的操作类型
 
 1. 在 `internal/executor/executor.go` 中注册新的处理器：
@@ -268,24 +303,69 @@ func (e *Executor) handleNewAction(ctx context.Context, params map[string]interf
 
 3. 在 `internal/security/security.go` 中添加安全规则（如需要）。
 
+## Web 界面使用说明
+
+### 功能特性
+
+- **实时录音**：按住"按住说话"按钮进行录音，松开自动发送
+- **文件上传**：支持上传 WAV/MP3 音频文件
+- **对话历史**：显示完整的交互记录
+- **音频播放**：自动播放语音反馈
+- **状态指示**：实时显示连接和处理状态
+- **会话管理**：自动维护对话会话
+
+### 浏览器要求
+
+- Chrome 60+
+- Firefox 55+
+- Safari 11+
+- Edge 79+
+
+需要浏览器支持：
+- MediaRecorder API（用于录音）
+- Fetch API（用于网络请求）
+
+### 使用步骤
+
+1. 确保服务器已启动（`make run` 或 `go run cmd/server/main.go`）
+2. 浏览器访问 `http://localhost:8080`
+3. 允许浏览器麦克风权限（首次使用时）
+4. 按住"按住说话"按钮进行录音
+5. 松开按钮，等待处理
+6. 查看文本响应和收听语音反馈
+
+### 移动端支持
+
+Web 界面完全响应式设计，支持在移动设备上使用。
+
 ## 故障排查
 
 ### 常见问题
 
-1. **七牛云 API 调用失败**
+1. **Go 版本过低导致编译失败**
+   - 错误信息：`package XXX is not in GOROOT`
+   - 解决方法：升级 Go 到 1.21 或更高版本
+   - 验证：`go version` 应显示 >= 1.21
+
+2. **七牛云 API 调用失败**
    - 检查 API Key 是否正确
    - 确认网络连接正常
    - 查看日志中的详细错误信息
 
-2. **音频文件上传失败**
+3. **音频文件上传失败**
    - 检查文件格式是否为 WAV
    - 确认文件大小不超过 10MB
    - 检查 temp 目录权限
 
-3. **应用程序无法打开**
+4. **应用程序无法打开**
    - 确认应用程序已安装
    - 在 macOS 上使用准确的应用程序名称
    - 检查系统权限设置
+
+5. **浏览器麦克风权限被拒绝**
+   - Chrome: 点击地址栏左侧的锁图标，允许麦克风权限
+   - Firefox: 点击地址栏左侧的图标，管理权限
+   - Safari: 系统偏好设置 → 安全性与隐私 → 隐私 → 麦克风
 
 ### 日志查看
 

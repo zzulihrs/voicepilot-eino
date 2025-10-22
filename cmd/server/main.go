@@ -55,6 +55,13 @@ func main() {
 
 	// Static files
 	r.GET("/static/audio/:filename", h.ServeAudio)
+	r.Static("/static/css", "./web/static/css")
+	r.Static("/static/js", "./web/static/js")
+
+	// Web UI
+	r.GET("/", func(c *gin.Context) {
+		c.File("./web/index.html")
+	})
 
 	// Start server
 	addr := ":" + config.AppConfig.Port

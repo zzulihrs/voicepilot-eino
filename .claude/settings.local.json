@@ -7,7 +7,11 @@
       "Bash(go mod init:*)",
       "Bash(go mod tidy:*)",
       "Bash(go fmt:*)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(make init:*)",
+      "Bash(make build:*)",
+      "Bash(go version:*)"
     ],
     "deny": [],
     "ask": []
