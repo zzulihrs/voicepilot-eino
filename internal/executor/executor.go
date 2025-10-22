@@ -8,12 +8,14 @@ import (
 	"runtime"
 	"strings"
 
+	"github.com/deca/voicepilot-eino/internal/qiniu"
 	"github.com/deca/voicepilot-eino/pkg/types"
 )
 
 // Executor executes tasks based on the task plan
 type Executor struct {
-	handlers map[string]ActionHandler
+	handlers    map[string]ActionHandler
+	qiniuClient *qiniu.Client
 }
 
 // ActionHandler is a function that handles a specific action
@@ -22,7 +24,8 @@ type ActionHandler func(ctx context.Context, params map[string]interface{}) *typ
 // NewExecutor creates a new executor
 func NewExecutor() *Executor {
 	e := &Executor{
-		handlers: make(map[string]ActionHandler),
+		handlers:    make(map[string]ActionHandler),
+		qiniuClient: qiniu.NewClient(),
 	}
 
 	// Register action handlers
@@ -30,6 +33,7 @@ func NewExecutor() *Executor {
 	e.RegisterHandler("play_music", e.handlePlayMusic)
 	e.RegisterHandler("execute_command", e.handleExecuteCommand)
 	e.RegisterHandler("generate_text", e.handleGenerateText)
+	e.RegisterHandler("write_article", e.handleGenerateText) // Alias for generate_text
 	e.RegisterHandler("clarify", e.handleClarify)
 	e.RegisterHandler("error", e.handleError)
 
@@ -178,27 +182,69 @@ func (e *Executor) handleExecuteCommand(ctx context.Context, params map[string]i
 	}
 }
 
-// handleGenerateText generates text content
+// handleGenerateText generates text content using LLM
 func (e *Executor) handleGenerateText(ctx context.Context, params map[string]interface{}) *types.ExecutionResult {
 	topic, ok := params["topic"].(string)
 	if !ok {
-		return &types.ExecutionResult{
-			Success: false,
-			Error:   "缺少主题参数",
+		// Try other parameter names
+		if content, ok := params["content"].(string); ok {
+			topic = content
+		} else if subject, ok := params["subject"].(string); ok {
+			topic = subject
+		} else {
+			return &types.ExecutionResult{
+				Success: false,
+				Error:   "缺少主题参数",
+			}
 		}
 	}
 
 	log.Printf("Generating text for topic: %s", topic)
 
-	// This would typically call an LLM to generate the text
-	// For now, return a placeholder
-	text := fmt.Sprintf("这是关于「%s」的文章。\n\n（此处应调用大语言模型生成完整内容）", topic)
+	// Get additional parameters
+	length := "适中"
+	if l, ok := params["length"].(string); ok {
+		length = l
+	}
+
+	contentType := "文章"
+	if ct, ok := params["content_type"].(string); ok {
+		contentType = ct
+	}
+
+	// Construct prompt for LLM
+	systemPrompt := "你是一个专业的内容创作助手。请根据用户的要求生成高质量的文本内容。"
+	userPrompt := fmt.Sprintf("请写一篇关于「%s」的%s，长度要求：%s。", topic, contentType, length)
+
+	messages := []qiniu.Message{
+		{Role: "system", Content: systemPrompt},
+		{Role: "user", Content: userPrompt},
+	}
+
+	// Call LLM to generate content
+	generatedText, err := e.qiniuClient.ChatCompletion(ctx, messages)
+	if err != nil {
+		log.Printf("Failed to generate text: %v", err)
+		return &types.ExecutionResult{
+			Success: false,
+			Error:   fmt.Sprintf("文本生成失败：%v", err),
+		}
+	}
+
+	log.Printf("Generated text: %s", generatedText[:min(100, len(generatedText))])
 
 	return &types.ExecutionResult{
 		Success: true,
-		Message: "文章已生成",
-		Data:    text,
+		Message: generatedText,
+		Data:    generatedText,
 	}
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 // handleClarify handles clarification requests

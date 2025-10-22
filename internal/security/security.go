@@ -21,6 +21,7 @@ func NewSecurityManager() *SecurityManager {
 			"open_app":        true,
 			"play_music":      true,
 			"generate_text":   true,
+			"write_article":   true, // Same as generate_text
 			"clarify":         true,
 			"error":           true,
 			"execute_command": false, // Only allowed in non-safe mode
