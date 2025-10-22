@@ -29,7 +29,12 @@ const (
 	msgTypeAudioOnlyRequest   = 0x2 // 0b0010 - Audio-only data
 	msgTypeFullServiceResponse = 0x9 // 0b1001 - Full service response
 
+	// Message type specific flags
+	flagNoSequence  = 0x0 // 0b0000 - No sequence number
+	flagPosSequence = 0x1 // 0b0001 - Positive sequence included
+
 	// Serialization methods
+	serializationNone = 0x0 // No serialization (raw binary)
 	serializationJSON = 0x1 // JSON serialization
 
 	// Compression methods
@@ -82,21 +87,27 @@ type WSASRAudioInfo struct {
 }
 
 // buildFrame constructs a binary frame according to the protocol
-func buildFrame(msgType byte, serializationMethod byte, compressionMethod byte, sequence int32, payload []byte) []byte {
+func buildFrame(msgType byte, flags byte, serializationMethod byte, compressionMethod byte, sequence int32, payload []byte) []byte {
 	// Build 4-byte header
 	header := make([]byte, 4)
 	header[0] = (protocolVersion << 4) | headerSize               // Protocol version | Header size
-	header[1] = (msgType << 4) | 0x0                              // Message type | Flags
+	header[1] = (msgType << 4) | flags                            // Message type | Flags
 	header[2] = (serializationMethod << 4) | compressionMethod    // Serialization | Compression
 	header[3] = 0x0                                               // Reserved
 
-	// Build frame: header + sequence + payload_size + payload
 	buf := new(bytes.Buffer)
 	binary.Write(buf, binary.BigEndian, header)
-	binary.Write(buf, binary.BigEndian, sequence)
-	binary.Write(buf, binary.BigEndian, int32(len(payload)))
-	buf.Write(payload)
 
+	// Include sequence field only if flags indicate sequenced message
+	if flags == flagPosSequence {
+		binary.Write(buf, binary.BigEndian, sequence)
+	}
+
+	// Always include payload size
+	binary.Write(buf, binary.BigEndian, int32(len(payload)))
+
+	// Write payload
+	buf.Write(payload)
 	return buf.Bytes()
 }
 
@@ -159,13 +170,6 @@ func parseFrame(frame []byte) (msgType byte, sequence int32, payload []byte, err
 	}
 
 	return msgType, sequence, payload, nil
-}
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }
 
 // WebSocketASR performs speech-to-text conversion using WebSocket
@@ -249,20 +253,31 @@ func (c *Client) WebSocketASR(ctx context.Context, audioPath string) (string, er
 
 	log.Printf("Sending configuration: %s", string(configJSON))
 
-	// Compress configuration
-	compressedConfig, err := compressPayload(configJSON)
-	if err != nil {
-		return "", fmt.Errorf("failed to compress config: %w", err)
-	}
-
-	// Build and send configuration frame
-	configFrame := buildFrame(msgTypeFullClientRequest, serializationJSON, compressionGzip, 0, compressedConfig)
+	// Build and send configuration frame (no sequence, no compression)
+	configFrame := buildFrame(msgTypeFullClientRequest, flagNoSequence, serializationJSON, compressionNone, 0, configJSON)
 	err = conn.WriteMessage(websocket.BinaryMessage, configFrame)
 	if err != nil {
 		return "", fmt.Errorf("failed to send config frame: %w", err)
 	}
 
 	log.Println("Configuration frame sent")
+
+	// Wait for configuration acknowledgment
+	_, message, err := conn.ReadMessage()
+	if err != nil {
+		return "", fmt.Errorf("failed to read config ack: %w", err)
+	}
+
+	msgType, _, payload, err := parseFrame(message)
+	if err != nil {
+		return "", fmt.Errorf("failed to parse config ack: %w", err)
+	}
+
+	log.Printf("Config acknowledgment received (type=0x%x)", msgType)
+	if msgType == 0xF {
+		// Error response
+		return "", fmt.Errorf("config rejected: %s", string(payload))
+	}
 
 	// Channel to collect results
 	resultChan := make(chan string, 1)
@@ -276,6 +291,9 @@ func (c *Client) WebSocketASR(ctx context.Context, audioPath string) (string, er
 			if err != nil {
 				if websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
 					log.Println("WebSocket closed normally")
+					if fullText == "" {
+						log.Println("No text recognized, connection closed")
+					}
 					resultChan <- fullText
 					return
 				}
@@ -291,35 +309,47 @@ func (c *Client) WebSocketASR(ctx context.Context, audioPath string) (string, er
 			}
 
 			log.Printf("Received message type: 0x%x, sequence: %d, payload size: %d bytes", msgType, sequence, len(payload))
-			log.Printf("Payload content: %s", string(payload)[:min(200, len(payload))])
 
-			// Parse response
-			if msgType == msgTypeFullServiceResponse {
+			// Try to parse as JSON regardless of message type
+			if len(payload) > 0 {
+				log.Printf("Payload preview: %s", string(payload)[:min(500, len(payload))])
+
+				// Try parsing as WSASRResponse
 				var response WSASRResponse
 				err = json.Unmarshal(payload, &response)
-				if err != nil {
-					log.Printf("Failed to unmarshal response: %v", err)
-					continue
-				}
-
-				log.Printf("ASR response: %+v", response)
-
-				if response.Result.Text != "" {
+				if err == nil && response.Result.Text != "" {
 					fullText = response.Result.Text
-					log.Printf("Recognized text: %s", fullText)
-				}
+					log.Printf("✅ Recognized text: %s", fullText)
+					// Don't return immediately, wait for more results or close
+				} else {
+					// Try parsing as generic map to see structure
+					var genericResp map[string]interface{}
+					if json.Unmarshal(payload, &genericResp) == nil {
+						log.Printf("Response structure: %+v", genericResp)
 
-				// Check if this is the final response (negative sequence indicates end)
-				if sequence < 0 {
-					resultChan <- fullText
-					return
+						// Try to extract text from various possible structures
+						if result, ok := genericResp["result"].(map[string]interface{}); ok {
+							if text, ok := result["text"].(string); ok && text != "" {
+								fullText = text
+								log.Printf("✅ Extracted text: %s", fullText)
+							}
+						}
+						if data, ok := genericResp["data"].(map[string]interface{}); ok {
+							if result, ok := data["result"].(map[string]interface{}); ok {
+								if text, ok := result["text"].(string); ok && text != "" {
+									fullText = text
+									log.Printf("✅ Extracted text from data: %s", fullText)
+								}
+							}
+						}
+					}
 				}
 			}
 		}
 	}()
 
-	// Send audio data in chunks
-	sequence := int32(1)
+	// Send audio data in chunks (sequence starts from 2, as 0-1 are reserved)
+	sequence := int32(2)
 	for offset := 0; offset < len(pcmData); offset += audioChunkSize {
 		end := offset + audioChunkSize
 		if end > len(pcmData) {
@@ -327,10 +357,10 @@ func (c *Client) WebSocketASR(ctx context.Context, audioPath string) (string, er
 		}
 
 		chunk := pcmData[offset:end]
-		log.Printf("Sending audio chunk %d: %d bytes", sequence, len(chunk))
+		log.Printf("Sending audio chunk (seq=%d): %d bytes", sequence, len(chunk))
 
-		// Build and send audio frame (no compression for audio data)
-		audioFrame := buildFrame(msgTypeAudioOnlyRequest, serializationJSON, compressionNone, sequence, chunk)
+		// Build and send audio frame (with sequence, raw binary, no compression)
+		audioFrame := buildFrame(msgTypeAudioOnlyRequest, flagPosSequence, serializationNone, compressionNone, sequence, chunk)
 		err = conn.WriteMessage(websocket.BinaryMessage, audioFrame)
 		if err != nil {
 			return "", fmt.Errorf("failed to send audio frame: %w", err)

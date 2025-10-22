@@ -264,7 +264,12 @@ class VoicePilotClient {
 
         this.updateStatus('connected', '已连接');
 
-        // Add conversation items
+        // Add user's recognized speech (if available from voice input)
+        if (data.recognized_text) {
+            this.addConversationItem('user', data.recognized_text);
+        }
+
+        // Add assistant's response
         this.addConversationItem('assistant', data.text);
 
         // Play audio response if available

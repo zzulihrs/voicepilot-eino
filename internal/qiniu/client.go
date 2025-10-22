@@ -89,11 +89,84 @@ func convertToWav(inputPath string) (string, error) {
 	return outputPath, nil
 }
 
-// ASR performs speech-to-text conversion using WebSocket
+// ASR performs speech-to-text conversion
 func (c *Client) ASR(ctx context.Context, audioPath string) (string, error) {
-	log.Printf("Using WebSocket ASR for audio file: %s", audioPath)
-	// Use WebSocket implementation for better compatibility
-	return c.WebSocketASR(ctx, audioPath)
+	log.Printf("Starting ASR for audio file: %s", audioPath)
+
+	// Strategy 1: Try HTTP REST API with storage upload (most reliable)
+	result, err := c.ASRWithStorage(ctx, audioPath)
+	if err == nil && result != "" {
+		return result, nil
+	}
+	log.Printf("Storage-based ASR not available: %v", err)
+
+	// Strategy 2: Try WebSocket ASR (implemented but may need permissions)
+	result, err = c.WebSocketASR(ctx, audioPath)
+	if err == nil && result != "" {
+		return result, nil
+	}
+	log.Printf("WebSocket ASR not available: %v", err)
+
+	// Both methods failed
+	return "", fmt.Errorf("语音识别暂不可用。请配置七牛云对象存储(QINIU_ACCESS_KEY/SECRET_KEY)或使用文字输入")
+}
+
+// ASRWithStorage uploads audio to storage and uses HTTP REST API
+func (c *Client) ASRWithStorage(ctx context.Context, audioPath string) (string, error) {
+	// Upload to storage
+	publicURL, err := c.UploadAudioToStorage(ctx, audioPath)
+	if err != nil {
+		return "", err
+	}
+
+	log.Printf("Using HTTP ASR with public URL: %s", publicURL)
+
+	// Call HTTP REST API
+	reqBody := map[string]interface{}{
+		"model": "asr",
+		"audio": map[string]interface{}{
+			"format": "wav",
+			"url":    publicURL,
+		},
+	}
+
+	reqBytes, _ := json.Marshal(reqBody)
+	client := &http.Client{Timeout: 60 * time.Second}
+	req, err := http.NewRequestWithContext(ctx, "POST", c.baseURL+"/voice/asr", bytes.NewReader(reqBytes))
+	if err != nil {
+		return "", err
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+c.apiKey)
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	respBody, _ := io.ReadAll(resp.Body)
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("ASR API error %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	// Parse response
+	var result map[string]interface{}
+	json.Unmarshal(respBody, &result)
+
+	// Extract text from response structure
+	if data, ok := result["data"].(map[string]interface{}); ok {
+		if resultData, ok := data["result"].(map[string]interface{}); ok {
+			if text, ok := resultData["text"].(string); ok {
+				log.Printf("ASR recognized: %s", text)
+				return text, nil
+			}
+		}
+	}
+
+	return "", fmt.Errorf("unexpected response format")
 }
 
 // ASRWebSocket performs speech-to-text conversion using WebSocket (new implementation)

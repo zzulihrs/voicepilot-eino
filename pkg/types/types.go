@@ -34,11 +34,12 @@ type VoiceRequest struct {
 
 // VoiceResponse represents a voice interaction response
 type VoiceResponse struct {
-	Text      string `json:"text"`
-	AudioURL  string `json:"audio_url,omitempty"`
-	SessionID string `json:"session_id"`
-	Success   bool   `json:"success"`
-	Error     string `json:"error,omitempty"`
+	RecognizedText string `json:"recognized_text,omitempty"` // ASR识别的用户原始语音文本
+	Text           string `json:"text"`                      // 系统响应文本
+	AudioURL       string `json:"audio_url,omitempty"`       // TTS生成的音频URL
+	SessionID      string `json:"session_id"`
+	Success        bool   `json:"success"`
+	Error          string `json:"error,omitempty"`
 }
 
 // WorkflowContext represents the context passed through the workflow

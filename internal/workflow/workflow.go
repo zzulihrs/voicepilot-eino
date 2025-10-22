@@ -76,10 +76,11 @@ func (w *VoiceWorkflow) Execute(ctx context.Context, audioPath, sessionID string
 
 	// Build final response
 	response := &types.VoiceResponse{
-		Text:      wfCtx.ResponseText,
-		AudioURL:  wfCtx.ResponseAudio,
-		SessionID: sessionID,
-		Success:   true,
+		RecognizedText: wfCtx.RecognizedText, // ASR识别的用户语音
+		Text:           wfCtx.ResponseText,   // 系统响应
+		AudioURL:       wfCtx.ResponseAudio,  // TTS音频
+		SessionID:      sessionID,
+		Success:        true,
 	}
 
 	log.Printf("Workflow execution completed successfully for session: %s", sessionID)
@@ -129,10 +130,11 @@ func (w *VoiceWorkflow) ExecuteText(ctx context.Context, text, sessionID string)
 
 	// Build final response
 	response := &types.VoiceResponse{
-		Text:      wfCtx.ResponseText,
-		AudioURL:  wfCtx.ResponseAudio,
-		SessionID: sessionID,
-		Success:   true,
+		RecognizedText: wfCtx.RecognizedText, // 用户输入的文本
+		Text:           wfCtx.ResponseText,   // 系统响应
+		AudioURL:       wfCtx.ResponseAudio,  // TTS音频
+		SessionID:      sessionID,
+		Success:        true,
 	}
 
 	log.Printf("Text workflow execution completed successfully for session: %s", sessionID)
