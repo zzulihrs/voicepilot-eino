@@ -89,107 +89,16 @@ func convertToWav(inputPath string) (string, error) {
 	return outputPath, nil
 }
 
-// ASR performs speech-to-text conversion
+// ASR performs speech-to-text conversion using WebSocket
 func (c *Client) ASR(ctx context.Context, audioPath string) (string, error) {
-	log.Printf("Starting ASR for audio file: %s", audioPath)
+	log.Printf("Using WebSocket ASR for audio file: %s", audioPath)
+	// Use WebSocket implementation for better compatibility
+	return c.WebSocketASR(ctx, audioPath)
+}
 
-	// Read audio file
-	audioData, err := os.ReadFile(audioPath)
-	if err != nil {
-		log.Printf("Failed to read audio file: %v", err)
-		return "", fmt.Errorf("failed to read audio file: %w", err)
-	}
-
-	// Detect audio format from file header
-	audioFormat := detectAudioFormat(audioData)
-	log.Printf("Detected audio format: %s", audioFormat)
-
-	// Convert to WAV if not already WAV format
-	finalAudioPath := audioPath
-	if audioFormat != "wav" {
-		log.Printf("Converting %s to WAV format...", audioFormat)
-		convertedPath, err := convertToWav(audioPath)
-		if err != nil {
-			return "", fmt.Errorf("failed to convert audio to WAV: %w", err)
-		}
-		defer os.Remove(convertedPath) // Clean up converted file after use
-		finalAudioPath = convertedPath
-
-		// Re-read the converted WAV file
-		audioData, err = os.ReadFile(finalAudioPath)
-		if err != nil {
-			return "", fmt.Errorf("failed to read converted audio file: %w", err)
-		}
-	}
-
-	// Encode to base64
-	audioBase64 := base64.StdEncoding.EncodeToString(audioData)
-
-	// Always use WAV format for ASR API
-	dataURL := "data:audio/wav;base64," + audioBase64
-
-	// Build request with WAV format
-	reqBody := map[string]interface{}{
-		"model": "asr",
-		"audio": map[string]interface{}{
-			"format": "wav",
-			"url":    dataURL,
-		},
-	}
-
-	reqBytes, err := json.Marshal(reqBody)
-	if err != nil {
-		log.Printf("Failed to marshal ASR request: %v", err)
-		return "", fmt.Errorf("failed to marshal request: %w", err)
-	}
-
-	log.Printf("ASR Request: %s", string(reqBytes)[:min(200, len(reqBytes))])
-
-	// Create HTTP request
-	url := c.baseURL + "/voice/asr"
-	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(reqBytes))
-	if err != nil {
-		log.Printf("Failed to create ASR request: %v", err)
-		return "", fmt.Errorf("failed to create request: %w", err)
-	}
-
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+c.apiKey)
-
-	// Send request (with 60s timeout as in ai-role)
-	client := &http.Client{Timeout: 60 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		log.Printf("Failed to send ASR request: %v", err)
-		return "", fmt.Errorf("failed to send request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		log.Printf("Failed to read ASR response: %v", err)
-		return "", fmt.Errorf("failed to read response: %w", err)
-	}
-
-	log.Printf("ASR API Response status: %d", resp.StatusCode)
-	log.Printf("ASR API Response body: %s", string(respBody))
-
-	if resp.StatusCode != http.StatusOK {
-		log.Printf("ASR API request failed with status %d: %s", resp.StatusCode, string(respBody))
-		return "", fmt.Errorf("ASR API returned status %d: %s", resp.StatusCode, string(respBody))
-	}
-
-	// Parse response
-	var result struct {
-		Text string `json:"text"`
-	}
-	if err := json.Unmarshal(respBody, &result); err != nil {
-		log.Printf("Failed to unmarshal ASR response: %v", err)
-		return "", fmt.Errorf("failed to parse response: %w", err)
-	}
-
-	log.Printf("Recognized text: %s", result.Text)
-	return result.Text, nil
+// ASRWebSocket performs speech-to-text conversion using WebSocket (new implementation)
+func (c *Client) ASRWebSocket(ctx context.Context, audioPath string) (string, error) {
+	return c.WebSocketASR(ctx, audioPath)
 }
 
 func min(a, b int) int {

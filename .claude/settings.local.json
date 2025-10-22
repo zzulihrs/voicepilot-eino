@@ -1,17 +1,7 @@
 {
   "permissions": {
     "allow": [
-      "Read(//Users/deca/project/ai-role/**)",
-      "Bash(cat:*)",
-      "Bash(git init:*)",
-      "Bash(go mod init:*)",
-      "Bash(go mod tidy:*)",
-      "Bash(go fmt:*)",
-      "Bash(git add:*)",
-      "Bash(git commit:*)",
-      "Bash(make init:*)",
-      "Bash(make build:*)",
-      "Bash(go version:*)"
+      "Bash(timeout 60 go run:*)"
     ],
     "deny": [],
     "ask": []
