@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"net/url"
 	"os/exec"
 	"runtime"
 	"strings"
@@ -117,9 +118,16 @@ func (e *Executor) handleOpenApp(ctx context.Context, params map[string]interfac
 	}
 }
 
-// handlePlayMusic plays music
+// handlePlayMusic opens NetEase Cloud Music app and searches for the song
 func (e *Executor) handlePlayMusic(ctx context.Context, params map[string]interface{}) *types.ExecutionResult {
+	// Try multiple parameter names for compatibility
 	song, ok := params["song"].(string)
+	if !ok {
+		song, ok = params["song_name"].(string)
+	}
+	if !ok {
+		song, ok = params["name"].(string)
+	}
 	if !ok {
 		return &types.ExecutionResult{
 			Success: false,
@@ -127,22 +135,115 @@ func (e *Executor) handlePlayMusic(ctx context.Context, params map[string]interf
 		}
 	}
 
-	log.Printf("Playing music: %s", song)
+	log.Printf("Opening NetEase Music app and searching for: %s", song)
 
-	// On macOS, open Music app with search
+	// Open NetEase Music app and search (macOS only)
 	if runtime.GOOS == "darwin" {
-		// First open Music app
-		cmd := exec.CommandContext(ctx, "open", "-a", "Music")
-		if err := cmd.Run(); err != nil {
-			log.Printf("Failed to open Music app: %v", err)
+		err := e.searchInNeteaseApp(ctx, song)
+		if err != nil {
+			log.Printf("Failed to search in NetEase app: %v", err)
+			return &types.ExecutionResult{
+				Success: false,
+				Error:   fmt.Sprintf("无法在网易云音乐中搜索：%v", err),
+			}
+		}
+
+		return &types.ExecutionResult{
+			Success: true,
+			Message: fmt.Sprintf("已在网易云音乐中搜索：%s", song),
+			Data:    song,
+		}
+	}
+
+	// Fallback for other OS: open web search
+	err := e.openNeteaseWebSearch(ctx, song)
+	if err != nil {
+		return &types.ExecutionResult{
+			Success: false,
+			Error:   fmt.Sprintf("无法打开网易云音乐搜索：%v", err),
 		}
 	}
 
 	return &types.ExecutionResult{
 		Success: true,
-		Message: fmt.Sprintf("正在为您播放：%s", song),
+		Message: fmt.Sprintf("已为您打开网易云音乐搜索：%s", song),
 		Data:    song,
 	}
+}
+
+// searchInNeteaseApp opens NetEase Cloud Music app and searches for the song
+func (e *Executor) searchInNeteaseApp(ctx context.Context, songName string) error {
+	// AppleScript to:
+	// 1. Open and activate NetEase Music app
+	// 2. Open search with Cmd+F
+	// 3. Use clipboard to input Chinese song name
+	// 4. Press Enter to search
+	// Note: We don't auto-play, user can choose which song to play
+	script := fmt.Sprintf(`
+		-- Open NetEase Music app
+		tell application "NeteaseMusic"
+			activate
+		end tell
+
+		delay 1.5
+
+		-- Copy song name to clipboard (supports Chinese)
+		set the clipboard to "%s"
+
+		tell application "System Events"
+			-- Open search with Cmd+F
+			keystroke "f" using command down
+			delay 0.5
+
+			-- Paste song name from clipboard
+			keystroke "v" using command down
+			delay 0.5
+
+			-- Press Enter to search
+			keystroke return
+		end tell
+	`, songName)
+
+	cmd := exec.CommandContext(ctx, "osascript", "-e", script)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("AppleScript execution failed: %v (output: %s)", err, string(output))
+	}
+
+	log.Printf("Successfully opened NetEase Music and searched for: %s", songName)
+	return nil
+}
+
+// openNeteaseWebSearch opens NetEase Cloud Music web search page for the song
+func (e *Executor) openNeteaseWebSearch(ctx context.Context, songName string) error {
+	// Build NetEase Cloud Music search URL
+	// Format: https://music.163.com/#/search/m/?s=ENCODED_SONG_NAME
+
+	// URL encode the song name (properly handles Chinese characters)
+	encodedSong := url.QueryEscape(songName)
+	searchURL := fmt.Sprintf("https://music.163.com/#/search/m/?s=%s", encodedSong)
+
+	log.Printf("Opening NetEase Music search for: %s (URL: %s)", songName, searchURL)
+
+	// Open URL in default browser
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "darwin": // macOS
+		cmd = exec.CommandContext(ctx, "open", searchURL)
+	case "linux":
+		cmd = exec.CommandContext(ctx, "xdg-open", searchURL)
+	case "windows":
+		cmd = exec.CommandContext(ctx, "cmd", "/c", "start", searchURL)
+	default:
+		return fmt.Errorf("unsupported operating system: %s", runtime.GOOS)
+	}
+
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("failed to open browser: %w", err)
+	}
+
+	log.Printf("Successfully opened NetEase Music search for: %s", songName)
+	return nil
 }
 
 // handleExecuteCommand executes a system command
