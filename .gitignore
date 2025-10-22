@@ -1,0 +1,57 @@
+# Binaries for programs and plugins
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+bin/
+dist/
+
+# Test binary, built with `go test -c`
+*.test
+
+# Output of the go coverage tool
+*.out
+coverage.txt
+coverage.html
+
+# Dependency directories
+vendor/
+
+# Go workspace file
+go.work
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Audio files (temporary)
+temp/
+*.wav
+*.mp3
+*.pcm
+!test/fixtures/*.wav
+
+# Data and logs
+data/
+logs/
+*.log
+*.db
+*.sqlite
+*.sqlite3
+
+# Static files (generated)
+static/audio/
+
+# Compiled Object files
+*.o
+*.a
