@@ -11,7 +11,6 @@ import (
 
 	"github.com/deca/voicepilot-eino/internal/config"
 	"github.com/deca/voicepilot-eino/internal/workflow"
-	"github.com/deca/voicepilot-eino/pkg/types"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 )
@@ -112,13 +111,18 @@ func (h *Handler) TextInteraction(c *gin.Context) {
 		req.SessionID = uuid.New().String()
 	}
 
-	// TODO: Implement text-based workflow
-	// For now, return a simple response
-	c.JSON(http.StatusOK, &types.VoiceResponse{
-		Text:      "文本交互功能开发中...",
-		SessionID: req.SessionID,
-		Success:   true,
-	})
+	// Execute text-based workflow (skip ASR, start from Intent node)
+	response, err := h.workflow.ExecuteText(c.Request.Context(), req.Text, req.SessionID)
+	if err != nil {
+		log.Printf("Text workflow execution failed: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"error":   fmt.Sprintf("处理失败：%v", err),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, response)
 }
 
 // HealthCheck handles health check requests

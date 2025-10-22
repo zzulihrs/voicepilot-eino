@@ -41,53 +41,64 @@ func (c *Client) ASR(ctx context.Context, audioPath string) (string, error) {
 	// Read audio file
 	audioData, err := os.ReadFile(audioPath)
 	if err != nil {
+		log.Printf("Failed to read audio file: %v", err)
 		return "", fmt.Errorf("failed to read audio file: %w", err)
 	}
 
 	// Encode to base64
 	audioBase64 := base64.StdEncoding.EncodeToString(audioData)
 
-	// Construct data URL
-	dataURL := fmt.Sprintf("data:audio/%s;base64,%s", config.AppConfig.ASRFormat, audioBase64)
+	// Construct data URL (format exactly as in ai-role project)
+	dataURL := "data:audio/wav;base64," + audioBase64
 
-	// Build request
+	// Build request (using same structure as ai-role)
 	reqBody := map[string]interface{}{
-		"model": config.AppConfig.ASRModel,
-		"audio": map[string]string{
-			"format": config.AppConfig.ASRFormat,
+		"model": "asr",
+		"audio": map[string]interface{}{
+			"format": "wav",
 			"url":    dataURL,
 		},
 	}
 
 	reqBytes, err := json.Marshal(reqBody)
 	if err != nil {
+		log.Printf("Failed to marshal ASR request: %v", err)
 		return "", fmt.Errorf("failed to marshal request: %w", err)
 	}
+
+	log.Printf("ASR Request: %s", string(reqBytes)[:min(200, len(reqBytes))])
 
 	// Create HTTP request
 	url := c.baseURL + "/voice/asr"
 	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(reqBytes))
 	if err != nil {
+		log.Printf("Failed to create ASR request: %v", err)
 		return "", fmt.Errorf("failed to create request: %w", err)
 	}
 
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+c.apiKey)
 
-	// Send request
-	resp, err := c.httpClient.Do(req)
+	// Send request (with 60s timeout as in ai-role)
+	client := &http.Client{Timeout: 60 * time.Second}
+	resp, err := client.Do(req)
 	if err != nil {
+		log.Printf("Failed to send ASR request: %v", err)
 		return "", fmt.Errorf("failed to send request: %w", err)
 	}
 	defer resp.Body.Close()
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
+		log.Printf("Failed to read ASR response: %v", err)
 		return "", fmt.Errorf("failed to read response: %w", err)
 	}
 
+	log.Printf("ASR API Response status: %d", resp.StatusCode)
+	log.Printf("ASR API Response body: %s", string(respBody))
+
 	if resp.StatusCode != http.StatusOK {
-		log.Printf("ASR API error response: %s", string(respBody))
+		log.Printf("ASR API request failed with status %d: %s", resp.StatusCode, string(respBody))
 		return "", fmt.Errorf("ASR API returned status %d: %s", resp.StatusCode, string(respBody))
 	}
 
@@ -96,11 +107,19 @@ func (c *Client) ASR(ctx context.Context, audioPath string) (string, error) {
 		Text string `json:"text"`
 	}
 	if err := json.Unmarshal(respBody, &result); err != nil {
+		log.Printf("Failed to unmarshal ASR response: %v", err)
 		return "", fmt.Errorf("failed to parse response: %w", err)
 	}
 
-	log.Printf("ASR completed successfully: %s", result.Text)
+	log.Printf("Recognized text: %s", result.Text)
 	return result.Text, nil
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 // TTS performs text-to-speech conversion
@@ -164,9 +183,12 @@ func (c *Client) TTS(ctx context.Context, text string) (string, error) {
 	// Check for direct URL
 	if url, ok := result["url"].(string); ok {
 		audioURL = url
-	} else if data, ok := result["audio"].(string); ok {
-		// Check if it's base64 data
+	} else if data, ok := result["data"].(string); ok {
+		// TTS response format: {"data": "base64..."}
 		audioData = data
+	} else if audioField, ok := result["audio"].(string); ok {
+		// Alternative format
+		audioData = audioField
 	} else if audioMap, ok := result["audio"].(map[string]interface{}); ok {
 		if data, ok := audioMap["data"].(string); ok {
 			audioData = data
@@ -182,16 +204,18 @@ func (c *Client) TTS(ctx context.Context, text string) (string, error) {
 
 		// Save to static audio path
 		filename := fmt.Sprintf("tts_%d.%s", time.Now().Unix(), config.AppConfig.TTSEncoding)
-		filepath := filepath.Join(config.AppConfig.StaticAudioPath, filename)
+		savePath := filepath.Join(config.AppConfig.StaticAudioPath, filename)
 
-		if err := os.WriteFile(filepath, decodedData, 0644); err != nil {
+		if err := os.WriteFile(savePath, decodedData, 0644); err != nil {
 			return "", fmt.Errorf("failed to save audio file: %w", err)
 		}
 
 		audioURL = fmt.Sprintf("/static/audio/%s", filename)
+		log.Printf("TTS audio saved to: %s", audioURL)
 	}
 
 	if audioURL == "" {
+		log.Printf("TTS response structure: %+v", result)
 		return "", fmt.Errorf("no audio URL or data in response")
 	}
 

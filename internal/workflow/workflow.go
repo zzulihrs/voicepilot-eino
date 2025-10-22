@@ -86,6 +86,59 @@ func (w *VoiceWorkflow) Execute(ctx context.Context, audioPath, sessionID string
 	return response, nil
 }
 
+// ExecuteText executes text-based interaction workflow (skip ASR)
+func (w *VoiceWorkflow) ExecuteText(ctx context.Context, text, sessionID string) (*types.VoiceResponse, error) {
+	log.Printf("Starting text workflow execution for session: %s", sessionID)
+
+	// Create workflow context with pre-filled text
+	wfCtx := &types.WorkflowContext{
+		SessionID:      sessionID,
+		RecognizedText: text,
+		Context:        make(map[string]interface{}),
+	}
+
+	// Skip ASR, start from Intent Recognition
+	if err := w.intentNode(ctx, wfCtx); err != nil {
+		return nil, fmt.Errorf("Intent node failed: %w", err)
+	}
+
+	// Planner Node
+	if err := w.plannerNode(ctx, wfCtx); err != nil {
+		return nil, fmt.Errorf("Planner node failed: %w", err)
+	}
+
+	// Security Check Node
+	if err := w.securityNode(ctx, wfCtx); err != nil {
+		return nil, fmt.Errorf("Security node failed: %w", err)
+	}
+
+	// Executor Node
+	if err := w.executorNode(ctx, wfCtx); err != nil {
+		return nil, fmt.Errorf("Executor node failed: %w", err)
+	}
+
+	// Response Generation Node
+	if err := w.responseNode(ctx, wfCtx); err != nil {
+		return nil, fmt.Errorf("Response node failed: %w", err)
+	}
+
+	// TTS Node
+	if err := w.ttsNode(ctx, wfCtx); err != nil {
+		return nil, fmt.Errorf("TTS node failed: %w", err)
+	}
+
+	// Build final response
+	response := &types.VoiceResponse{
+		Text:      wfCtx.ResponseText,
+		AudioURL:  wfCtx.ResponseAudio,
+		SessionID: sessionID,
+		Success:   true,
+	}
+
+	log.Printf("Text workflow execution completed successfully for session: %s", sessionID)
+	return response, nil
+}
+
 // asrNode performs speech-to-text conversion
 func (w *VoiceWorkflow) asrNode(ctx context.Context, wfCtx *types.WorkflowContext) error {
 	log.Printf("ASR Node: Processing audio file")
