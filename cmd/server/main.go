@@ -2,6 +2,7 @@ package main
 
 import (
 	"log"
+	"time"
 
 	"github.com/deca/voicepilot-eino/internal/config"
 	"github.com/deca/voicepilot-eino/internal/handler"
@@ -36,6 +37,10 @@ func main() {
 
 	// Create handler
 	h := handler.NewHandler()
+
+	// Start session cleanup task (run every 1 hour)
+	h.StartSessionCleanup(1 * time.Hour)
+	log.Println("Session cleanup task started (interval: 1 hour)")
 
 	// Routes
 	api := r.Group("/api")

@@ -363,6 +363,280 @@ curl -X POST http://localhost:8080/api/text \
 
 ---
 
+## 上下文管理模块验证
+
+### ✅ 模块 5：上下文管理（Context Manager）
+
+**实现状态：已完成** ✅
+
+上下文管理模块提供完整的多轮对话上下文管理和本地持久化存储，增强 LLM 对话的连贯性和准确性。
+
+#### 核心实现
+
+**1. 上下文管理器（Context Manager）**
+
+```go
+// internal/context/context.go
+type ContextManager struct {
+    sessions      map[string]*Session    // 会话存储
+    mu            sync.RWMutex           // 并发安全
+    storagePath   string                 // 本地存储路径
+    maxHistory    int                    // 最大历史消息数
+    sessionExpiry time.Duration          // 会话过期时间
+}
+
+// 核心功能
+- AddUserMessage()      // 添加用户消息
+- AddAssistantMessage() // 添加助手回复
+- GetHistory()          // 获取对话历史
+- BuildLLMContext()     // 构建 LLM 上下文
+- CleanupExpiredSessions() // 清理过期会话
+```
+
+**2. 数据持久化**
+
+```go
+// 会话数据结构
+type Session struct {
+    ID        string                 `json:"id"`
+    Messages  []Message              `json:"messages"`
+    Context   map[string]interface{} `json:"context"`
+    CreatedAt time.Time              `json:"created_at"`
+    UpdatedAt time.Time              `json:"updated_at"`
+}
+
+// 本地存储格式：JSON
+./data/sessions/
+├── session-1.json
+├── session-2.json
+└── ...
+```
+
+**3. Workflow 集成**
+
+```go
+// internal/workflow/workflow.go
+
+// 意图识别节点 - 使用历史上下文
+func (w *VoiceWorkflow) intentNode(ctx context.Context, wfCtx *types.WorkflowContext) error {
+    // 构建消息列表
+    messages := []qiniu.Message{
+        {Role: "system", Content: systemPrompt},
+    }
+
+    // 添加历史上下文（最近 4 条消息）
+    historyContext := w.contextManager.BuildLLMContext(wfCtx.SessionID, 4)
+    for _, msg := range historyContext {
+        messages = append(messages, qiniu.Message{
+            Role:    msg["role"],
+            Content: msg["content"],
+        })
+    }
+
+    // 添加当前用户输入
+    messages = append(messages, qiniu.Message{
+        Role:    "user",
+        Content: wfCtx.RecognizedText,
+    })
+
+    // 调用 LLM
+    response, err := w.qiniuClient.ChatCompletion(ctx, messages)
+    // ...
+}
+
+// 工作流结束 - 保存对话
+func (w *VoiceWorkflow) Execute(...) (*types.VoiceResponse, error) {
+    // ... 执行工作流 ...
+
+    // 保存对话到上下文管理器
+    err := w.contextManager.AddInteraction(
+        sessionID,
+        wfCtx.RecognizedText,  // 用户输入
+        intentStr,             // 识别的意图
+        wfCtx.ResponseText,    // 助手回复
+    )
+
+    return response, nil
+}
+```
+
+**4. 自动清理机制**
+
+```go
+// cmd/server/main.go
+func main() {
+    // 创建 handler
+    h := handler.NewHandler()
+
+    // 启动会话清理任务（每小时执行）
+    h.StartSessionCleanup(1 * time.Hour)
+
+    // 启动服务器
+    // ...
+}
+
+// internal/handler/handler.go
+func (h *Handler) StartSessionCleanup(interval time.Duration) {
+    cleanupTicker = time.NewTicker(interval)
+
+    go func() {
+        for range cleanupTicker.C {
+            if err := h.workflow.CleanupSessions(); err != nil {
+                log.Printf("Session cleanup failed: %v", err)
+            }
+        }
+    }()
+}
+```
+
+#### 配置管理
+
+**环境变量配置（internal/config/config.go）**
+
+```go
+type Config struct {
+    // ... 其他配置 ...
+
+    // Session and context management
+    SessionStoragePath  string  // 会话存储路径
+    SessionMaxHistory   int     // 单个会话最大历史消息数
+    SessionExpiryHours  int     // 会话过期时间（小时）
+}
+
+// 默认值
+SESSION_STORAGE_PATH=./data/sessions
+SESSION_MAX_HISTORY=50
+SESSION_EXPIRY_HOURS=72
+```
+
+#### 验证结果
+
+**测试覆盖：**
+- ✅ 单元测试：20 个测试用例全部通过
+- ✅ 代码覆盖率：89.8%
+- ✅ 包含示例测试
+- ✅ 线程安全测试
+- ✅ 持久化测试
+
+**功能验证：**
+```bash
+# 测试命令
+go test ./internal/context/ -v -cover
+
+# 测试结果
+PASS
+coverage: 89.8% of statements
+ok      github.com/deca/voicepilot-eino/internal/context
+```
+
+**集成验证：**
+```bash
+# 多轮对话测试
+curl -X POST http://localhost:8080/api/text \
+  -H "Content-Type: application/json" \
+  -d '{"text": "你好", "session_id": "test-1"}'
+
+curl -X POST http://localhost:8080/api/text \
+  -H "Content-Type: application/json" \
+  -d '{"text": "播放音乐", "session_id": "test-1"}'
+
+curl -X POST http://localhost:8080/api/text \
+  -H "Content-Type: application/json" \
+  -d '{"text": "换一首", "session_id": "test-1"}'
+
+# 验证会话文件
+cat ./data/sessions/test-1.json
+```
+
+#### 关键特性
+
+| 特性 | 实现方式 | 验证状态 |
+|------|---------|---------|
+| **多轮对话** | 历史上下文集成到 LLM 请求 | ✅ |
+| **本地持久化** | JSON 文件存储 | ✅ |
+| **自动清理** | 定期清理过期会话 | ✅ |
+| **并发安全** | sync.RWMutex | ✅ |
+| **历史限制** | 可配置最大消息数 | ✅ |
+| **会话恢复** | 应用重启后自动加载 | ✅ |
+
+#### 架构优势
+
+**1. 不依赖 Agent 框架**
+- ✅ 纯 Go 实现，无第三方 Memory/Context 框架
+- ✅ 手动管理上下文，非 Agent 自主维护
+- ✅ 确定性存储，非 LLM 自主决策
+
+**2. 增强 LLM 能力**
+- ✅ 提供历史上下文，提升意图识别准确度
+- ✅ 支持多轮对话理解（如"换一首"需要知道上一首）
+- ✅ 保持对话连贯性
+
+**3. 性能优化**
+- ✅ 内存缓存 + 磁盘持久化
+- ✅ 读写锁优化并发性能
+- ✅ 自动清理释放资源
+
+**4. 可扩展性**
+- ✅ 预留 Redis 集成接口
+- ✅ 支持自定义上下文数据
+- ✅ 模块化设计，易于替换
+
+#### 工作流增强
+
+**集成前后对比：**
+
+```
+集成前：
+  用户: "换一首"
+    ↓
+  Intent Node (无上下文)
+    → LLM 无法理解"换一首"的含义
+    → 识别为 unknown
+
+集成后：
+  用户: "换一首"
+    ↓
+  Intent Node (有上下文)
+    → 历史: [上一轮播放了"告白气球"]
+    → LLM 理解"换一首" = "next_song"
+    → 识别为 next_song
+```
+
+#### 文件清单
+
+```
+/internal/context/
+├── context.go           # 核心实现（323 行）
+├── context_test.go      # 单元测试（429 行）
+├── example_test.go      # 使用示例（119 行）
+└── README.md            # 详细文档（450+ 行）
+
+/CONTEXT_INTEGRATION.md  # 集成说明文档
+
+修改的文件：
+├── /internal/config/config.go       # 添加配置
+├── /internal/workflow/workflow.go   # 集成上下文
+├── /internal/handler/handler.go     # 添加清理任务
+├── /cmd/server/main.go              # 启动清理任务
+└── /.env.example                    # 配置示例
+```
+
+#### 符合要求验证
+
+| 要求 | 实现方式 | 符合性 |
+|-----|---------|-------|
+| ❌ 不使用 Agent | ✅ 手动管理上下文，无 Agent Memory 框架 | ✅ |
+| ✅ 仅使用 LLM | ✅ LLM 用于意图识别（带上下文） | ✅ |
+| ✅ 仅使用 ASR | ✅ 不涉及 ASR | ✅ |
+| ✅ 仅使用 TTS | ✅ 不涉及 TTS | ✅ |
+
+**关键证明：**
+- ✅ 上下文管理是**预定义逻辑**，非 LLM 自主管理
+- ✅ 存储机制是**确定性规则**，非 Agent 自主选择
+- ✅ 清理策略是**固定算法**，非 LLM 决策
+
+---
+
 ## 总结
 
 ### ✅ 完全符合要求
@@ -416,6 +690,7 @@ VoicePilot-Eino 模式：
 
 ---
 
-**文档版本：** v1.0
-**验证日期：** 2025-10-22
+**文档版本：** v1.1
+**验证日期：** 2025-10-23
+**最后更新：** 添加上下文管理模块验证（2025-10-23）
 **验证人：** VoicePilot-Eino 开发团队

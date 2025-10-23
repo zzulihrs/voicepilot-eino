@@ -5,7 +5,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"time"
 
+	ctxmanager "github.com/deca/voicepilot-eino/internal/context"
+	"github.com/deca/voicepilot-eino/internal/config"
 	"github.com/deca/voicepilot-eino/internal/executor"
 	"github.com/deca/voicepilot-eino/internal/qiniu"
 	"github.com/deca/voicepilot-eino/internal/security"
@@ -14,17 +17,26 @@ import (
 
 // VoiceWorkflow represents the complete voice interaction workflow
 type VoiceWorkflow struct {
-	qiniuClient *qiniu.Client
-	executor    *executor.Executor
-	security    *security.SecurityManager
+	qiniuClient    *qiniu.Client
+	executor       *executor.Executor
+	security       *security.SecurityManager
+	contextManager *ctxmanager.ContextManager
 }
 
 // NewVoiceWorkflow creates a new voice workflow
 func NewVoiceWorkflow() *VoiceWorkflow {
+	// Create context manager with configuration
+	sessionExpiry := time.Duration(config.AppConfig.SessionExpiryHours) * time.Hour
+
 	return &VoiceWorkflow{
 		qiniuClient: qiniu.NewClient(),
 		executor:    executor.NewExecutor(),
 		security:    security.NewSecurityManager(),
+		contextManager: ctxmanager.NewContextManager(
+			config.AppConfig.SessionStoragePath,
+			config.AppConfig.SessionMaxHistory,
+			sessionExpiry,
+		),
 	}
 }
 
@@ -83,6 +95,16 @@ func (w *VoiceWorkflow) Execute(ctx context.Context, audioPath, sessionID string
 		Success:        true,
 	}
 
+	// Save conversation to context manager
+	intentStr := ""
+	if wfCtx.Intent != nil {
+		intentStr = wfCtx.Intent.Intent
+	}
+	if err := w.contextManager.AddInteraction(sessionID, wfCtx.RecognizedText, intentStr, wfCtx.ResponseText); err != nil {
+		log.Printf("Warning: failed to save conversation to context: %v", err)
+		// Don't fail the workflow if context saving fails
+	}
+
 	log.Printf("Workflow execution completed successfully for session: %s", sessionID)
 	return response, nil
 }
@@ -137,6 +159,16 @@ func (w *VoiceWorkflow) ExecuteText(ctx context.Context, text, sessionID string)
 		Success:        true,
 	}
 
+	// Save conversation to context manager
+	intentStr := ""
+	if wfCtx.Intent != nil {
+		intentStr = wfCtx.Intent.Intent
+	}
+	if err := w.contextManager.AddInteraction(sessionID, wfCtx.RecognizedText, intentStr, wfCtx.ResponseText); err != nil {
+		log.Printf("Warning: failed to save conversation to context: %v", err)
+		// Don't fail the workflow if context saving fails
+	}
+
 	log.Printf("Text workflow execution completed successfully for session: %s", sessionID)
 	return response, nil
 }
@@ -177,10 +209,25 @@ func (w *VoiceWorkflow) intentNode(ctx context.Context, wfCtx *types.WorkflowCon
 
 只输出JSON，不要输出其他内容。`
 
+	// Build messages with conversation history for better context understanding
 	messages := []qiniu.Message{
 		{Role: "system", Content: systemPrompt},
-		{Role: "user", Content: wfCtx.RecognizedText},
 	}
+
+	// Add conversation history (last 4 messages = 2 interactions)
+	historyContext := w.contextManager.BuildLLMContext(wfCtx.SessionID, 4)
+	for _, msg := range historyContext {
+		messages = append(messages, qiniu.Message{
+			Role:    msg["role"],
+			Content: msg["content"],
+		})
+	}
+
+	// Add current user input
+	messages = append(messages, qiniu.Message{
+		Role:    "user",
+		Content: wfCtx.RecognizedText,
+	})
 
 	response, err := w.qiniuClient.ChatCompletion(ctx, messages)
 	if err != nil {
@@ -363,4 +410,9 @@ func (w *VoiceWorkflow) ttsNode(ctx context.Context, wfCtx *types.WorkflowContex
 	wfCtx.ResponseAudio = audioURL
 	log.Printf("TTS Node: Audio URL: %s", audioURL)
 	return nil
+}
+
+// CleanupSessions cleans up expired sessions from context manager
+func (w *VoiceWorkflow) CleanupSessions() error {
+	return w.contextManager.CleanupExpiredSessions()
 }

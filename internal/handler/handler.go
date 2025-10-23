@@ -15,6 +15,8 @@ import (
 	"github.com/google/uuid"
 )
 
+var cleanupTicker *time.Ticker
+
 // Handler handles HTTP requests
 type Handler struct {
 	workflow *workflow.VoiceWorkflow
@@ -200,4 +202,30 @@ func (h *Handler) UploadAudio(c *gin.Context) {
 		"path":     dstPath,
 		"size":     file.Size,
 	})
+}
+
+// StartSessionCleanup starts a background task to periodically clean up expired sessions
+func (h *Handler) StartSessionCleanup(interval time.Duration) {
+	log.Printf("Starting session cleanup task (interval: %v)", interval)
+
+	cleanupTicker = time.NewTicker(interval)
+
+	go func() {
+		for range cleanupTicker.C {
+			log.Println("Running session cleanup task...")
+			if err := h.workflow.CleanupSessions(); err != nil {
+				log.Printf("Session cleanup failed: %v", err)
+			} else {
+				log.Println("Session cleanup completed")
+			}
+		}
+	}()
+}
+
+// StopSessionCleanup stops the background cleanup task
+func (h *Handler) StopSessionCleanup() {
+	if cleanupTicker != nil {
+		cleanupTicker.Stop()
+		log.Println("Session cleanup task stopped")
+	}
 }
