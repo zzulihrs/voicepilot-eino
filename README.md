@@ -8,20 +8,23 @@ VoicePilot-Eino 是一个智能语音控制系统，支持通过语音交互控�
 
 ### 主要功能
 
-- 语音识别：将用户语音转换为文本
-- 意图识别：理解用户意图并生成结构化指令
-- 任务执行：根据意图执行相应的系统操作
-- 语音反馈：将执行结果转换为语音输出
-- 安全控制：白名单机制防止危险操作
-- Web 界面：浏览器端语音交互界面
-- 单元测试：完整的测试覆盖
+- 🎤 **语音识别**：将用户语音转换为文本（支持 WebSocket 和 HTTP 双策略）
+- 🧠 **意图识别**：理解用户意图并生成结构化指令
+- 📋 **任务规划**：自动分解多步任务
+- 🔐 **安全控制**：白名单机制防止危险操作
+- 🤖 **任务执行**：根据意图执行相应的系统操作
+- 💬 **上下文管理**：支持多轮对话，自动维护对话上下文
+- 🔊 **语音反馈**：将执行结果转换为语音输出
+- 🌐 **Web 界面**：浏览器端语音交互界面
+- 📊 **完整测试**：单元测试覆盖率 89.8%+
 
 ### 支持的操作
 
-- 打开应用程序
-- 播放音乐
-- 生成文本内容
-- 系统命令执行（安全模式下受限）
+- 🖥️ 打开应用程序
+- 🎵 播放音乐（网易云音乐集成）
+- ✍️ 生成文本内容（AI 写作）
+- 💻 系统命令执行（安全模式下受限）
+- 💬 多轮对话（支持上下文理解）
 
 ## 技术架构
 
@@ -55,35 +58,41 @@ VoicePilot-Eino 是一个智能语音控制系统，支持通过语音交互控�
 ### 项目结构
 
 ```
-.
+VoicePilot-Eino/
 ├── cmd/
 │   └── server/          # 服务入口
 │       └── main.go
 ├── internal/
 │   ├── config/          # 配置管理
+│   ├── context/         # 上下文管理模块（多轮对话）
 │   ├── qiniu/           # 七牛云 API 客户端
-│   ├── workflow/        # 工作流节点
+│   ├── workflow/        # 工作流节点（7节点编排）
 │   ├── executor/        # 任务执行器
 │   ├── security/        # 安全模块
 │   └── handler/         # HTTP 处理器
 ├── pkg/
-│   ├── types/           # 公共类型定义
-│   └── utils/           # 工具函数
-├── web/                 # Web前端
+│   └── types/           # 公共类型定义
+├── web/                 # Web 前端
 │   ├── index.html       # 主页面
 │   └── static/
 │       ├── css/         # 样式文件
 │       └── js/          # JavaScript
+├── docs/                # 项目文档
+│   ├── README.md        # 文档索引
+│   ├── 设计方案.md      # 总体设计
+│   ├── PRODUCT_DESIGN.md # 产品设计
+│   ├── IMPLEMENTATION_VERIFICATION.md # 实现验证
+│   ├── ASR_README.md    # ASR 技术文档
+│   └── CONTEXT_INTEGRATION.md # 上下文集成文档
+├── data/
+│   └── sessions/        # 会话数据存储（本地持久化）
 ├── static/
 │   └── audio/           # 音频文件存储
 ├── temp/                # 临时文件
+├── tests/               # 测试文件
 ├── .env.example         # 环境变量模板
-├── .gitignore
-├── .editorconfig
-├── Makefile
-├── go.mod
-├── go.sum
-└── README.md
+├── Makefile             # 构建脚本
+└── README.md            # 本文档
 ```
 
 ## 快速开始
@@ -216,19 +225,47 @@ GET /static/audio/:filename
 
 ### 环境变量
 
+#### 服务器配置
 | 变量名 | 说明 | 默认值 |
 |--------|------|--------|
 | PORT | 服务端口 | 8080 |
+
+#### 七牛云 API 配置
+| 变量名 | 说明 | 默认值 |
+|--------|------|--------|
 | QINIU_API_KEY | 七牛云 API Key | 必填 |
 | QINIU_BASE_URL | 七牛云 API 地址 | https://openai.qiniu.com/v1 |
+
+#### TTS 配置
+| 变量名 | 说明 | 默认值 |
+|--------|------|--------|
 | TTS_VOICE_TYPE | TTS 音色类型 | qiniu_zh_female_wwxkjx |
 | TTS_ENCODING | TTS 音频格式 | mp3 |
 | TTS_SPEED_RATIO | TTS 语速比例 | 1.0 |
+
+#### ASR 配置
+| 变量名 | 说明 | 默认值 |
+|--------|------|--------|
 | ASR_MODEL | ASR 模型 | asr |
 | ASR_FORMAT | ASR 音频格式 | wav |
+
+#### LLM 配置
+| 变量名 | 说明 | 默认值 |
+|--------|------|--------|
 | LLM_MODEL | LLM 模型 | deepseek/deepseek-v3.1-terminus |
 | LLM_MAX_TOKENS | LLM 最大 Token 数 | 2000 |
 | LLM_TEMPERATURE | LLM 温度参数 | 0.7 |
+
+#### 会话和上下文管理
+| 变量名 | 说明 | 默认值 |
+|--------|------|--------|
+| SESSION_STORAGE_PATH | 会话存储路径 | ./data/sessions |
+| SESSION_MAX_HISTORY | 单个会话最大历史消息数 | 50 |
+| SESSION_EXPIRY_HOURS | 会话过期时间（小时） | 72 |
+
+#### 安全配置
+| 变量名 | 说明 | 默认值 |
+|--------|------|--------|
 | ENABLE_SAFE_MODE | 启用安全模式 | true |
 | MAX_AUDIO_SIZE | 最大音频文件大小 | 10485760 (10MB) |
 
@@ -268,6 +305,7 @@ make test
 项目包含以下模块的单元测试：
 
 - `internal/config`: 配置管理测试
+- `internal/context`: 上下文管理测试（覆盖率 89.8%）
 - `internal/security`: 安全验证测试
 - `internal/executor`: 任务执行测试
 
@@ -278,11 +316,16 @@ go test ./...
 
 # 运行特定模块测试
 go test ./internal/config
+go test ./internal/context -v -cover
 go test ./internal/security
 go test ./internal/executor
 
 # 查看测试覆盖率
 go test -cover ./...
+
+# 生成覆盖率报告
+go test -coverprofile=coverage.out ./...
+go tool cover -html=coverage.out
 ```
 
 ### 添加新的操作类型
@@ -432,11 +475,22 @@ sudo systemctl start voicepilot-eino
 
 MIT License
 
+## 项目文档
+
+完整的项目文档请参考 [docs 目录](./docs/)：
+
+- 📋 [设计方案](./docs/设计方案.md) - 总体架构设计
+- 💡 [产品设计](./docs/PRODUCT_DESIGN.md) - 产品功能设计
+- ✅ [实现验证](./docs/IMPLEMENTATION_VERIFICATION.md) - 实现验证文档
+- 🎤 [ASR 技术文档](./docs/ASR_README.md) - 语音识别技术说明
+- 🔄 [上下文集成文档](./docs/CONTEXT_INTEGRATION.md) - 上下文管理集成说明
+- 📘 [上下文模块 API](./internal/context/README.md) - 上下文管理模块详细文档
+
 ## 相关链接
 
 - [七牛云官网](https://www.qiniu.com/)
 - [七牛云 API 文档](https://developer.qiniu.com/)
-- [设计方案](./设计方案.md)
+- [GitHub 仓库](https://github.com/deca/voicepilot-eino)
 
 ## 作者
 
